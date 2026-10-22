@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Color Video to ASCII Art Player - Python</title>
+  <title>Color Video to ASCII Art Studio - Python</title>
   
   <link rel="stylesheet" href="https://pyscript.net/releases/2024.1.1/core.css">
   <script type="module" src="https://pyscript.net/releases/2024.1.1/core.js"></script>
@@ -41,7 +41,7 @@
       border: 1px solid #4a5568;
       background: #1f2738;
       color: white;
-      min-width: 220px;
+      min-width: 200px;
     }
     button, label.btn {
       padding: 8px 14px;
@@ -52,9 +52,25 @@
       cursor: pointer;
       font-weight: 600;
       font-size: 0.85rem;
+      transition: background 0.2s;
     }
     button:hover, label.btn:hover {
       background: #2b6cb0;
+    }
+    .rec-btn {
+      background: #e53e3e;
+    }
+    .rec-btn:hover {
+      background: #c53030;
+    }
+    .rec-active {
+      background: #dd6b20 !important;
+      animation: pulse 1.2s infinite;
+    }
+    @keyframes pulse {
+      0% { opacity: 1; }
+      50% { opacity: 0.65; }
+      100% { opacity: 1; }
     }
     .control-group {
       display: flex;
@@ -88,7 +104,7 @@
   <h1>Color Video & 3D ASCII Studio (Python)</h1>
 
   <div class="panel">
-    <button py-click="start_sun_moon" style="background: #d69e2e;">Sun & Moon 3D Demo</button>
+    <button py-click="start_sun_moon" style="background: #d69e2e;">Sun & Moon 3D</button>
 
     <label class="btn">
       Upload Video (.mp4)
@@ -108,7 +124,11 @@
       <input type="checkbox" id="colorMode" checked>
     </div>
 
-    <button py-click="download_ascii" style="background: #2f855a;">Download (.txt)</button>
+    <!-- Przycisk nagrywania wideo ASCII -->
+    <button id="recBtn" class="rec-btn" onclick="toggleVideoRecording()">Start Recording Video</button>
+
+    <!-- Pobranie pojedynczej klatki .txt -->
+    <button py-click="download_ascii" style="background: #2f855a;">Save Frame (.txt)</button>
   </div>
 
   <div id="asciiWrapper">
@@ -118,6 +138,67 @@
   <video id="sourceVideo" loop muted playsinline crossorigin="anonymous"></video>
   <canvas id="hiddenCanvas" style="display: none;"></canvas>
 
+  <!-- Moduł nagrywania strumienia Canvas do pliku .mp4 / .webm -->
+  <script>
+    let mediaRecorder = null;
+    let recordedChunks = [];
+    let isRecording = false;
+
+    function toggleVideoRecording() {
+      const canvas = document.getElementById("renderCanvas");
+      const recBtn = document.getElementById("recBtn");
+
+      if (!isRecording) {
+        recordedChunks = [];
+        // Przechwytywanie obrazu z Canvas w 30 FPS
+        const stream = canvas.captureStream(30);
+
+        // Wybór najlepszego wspieranego formatu (MP4 lub WebM)
+        let mimeType = "video/webm;codecs=vp9";
+        let ext = "mp4";
+        if (MediaRecorder.isTypeSupported("video/mp4")) {
+          mimeType = "video/mp4";
+          ext = "mp4";
+        } else if (MediaRecorder.isTypeSupported("video/webm")) {
+          mimeType = "video/webm";
+          ext = "webm";
+        }
+
+        mediaRecorder = new MediaRecorder(stream, {
+          mimeType: mimeType,
+          videoBitsPerSecond: 8000000 // Wysoka jakość 8 Mbps
+        });
+
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data && event.data.size > 0) {
+            recordedChunks.push(event.data);
+          }
+        };
+
+        mediaRecorder.onstop = () => {
+          const blob = new Blob(recordedChunks, { type: mimeType });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `ascii_animation.${ext}`;
+          a.click();
+          URL.revokeObjectURL(url);
+        };
+
+        mediaRecorder.start();
+        isRecording = true;
+        recBtn.textContent = "Stop & Save Video";
+        recBtn.classList.add("rec-active");
+      } else {
+        mediaRecorder.stop();
+        isRecording = false;
+        recBtn.textContent = "Start Recording Video";
+        recBtn.classList.remove("rec-active");
+      }
+    }
+  </script>
+
+  <!-- Silnik Pythona (PyScript) -->
   <script type="py">
 import math
 import random
@@ -132,10 +213,9 @@ render_canvas = document.getElementById("renderCanvas")
 ctx = render_canvas.getContext("2d")
 
 ASCII_CHARS = " .':;!*=#$@"
-mode = "demo"  # "demo" or "video"
+mode = "demo"
 last_txt_frame = ""
 
-# Gwiazdy w tle dla trybu Sun & Moon
 stars = []
 for _ in range(75):
     stars.append({
@@ -223,14 +303,11 @@ def main_loop(timestamp=0):
     ctx.font = f"bold {font_size}px 'Courier New', monospace"
 
     if mode == "demo":
-        # Gwiazdy w tle
         ctx.fillStyle = "#4a5568"
         for s in stars:
             ctx.fillText(s["char"], s["x"], s["y"])
 
-        # Słońce (lewa strona)
         draw_demo_sphere(W * 0.3, H * 0.5, 195, angle_sun, (255, 185, 50), (0.8, -0.4, 1.0), font_size, use_color)
-        # Księżyc (prawa strona)
         draw_demo_sphere(W * 0.7, H * 0.5, 195, angle_moon, (80, 175, 255), (-0.8, -0.3, 0.9), font_size, use_color)
 
         angle_sun += 0.035

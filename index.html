@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Color Video to ASCII Art Player - Python</title>
+  
+  <link rel="stylesheet" href="https://pyscript.net/releases/2024.1.1/core.css">
+  <script type="module" src="https://pyscript.net/releases/2024.1.1/core.js"></script>
+
+  <style>
+    body {
+      margin: 0;
+      background-color: #06070b;
+      color: #e2e8f0;
+      font-family: system-ui, -apple-system, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 15px;
+    }
+    h1 {
+      font-size: 1.4rem;
+      margin: 5px 0 12px 0;
+    }
+    .panel {
+      background: #141824;
+      padding: 12px 18px;
+      border-radius: 10px;
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 15px;
+      border: 1px solid #2d3748;
+    }
+    input[type="text"] {
+      padding: 8px 12px;
+      border-radius: 6px;
+      border: 1px solid #4a5568;
+      background: #1f2738;
+      color: white;
+      min-width: 220px;
+    }
+    button, label.btn {
+      padding: 8px 14px;
+      border-radius: 6px;
+      background: #3182ce;
+      color: white;
+      border: none;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.85rem;
+    }
+    button:hover, label.btn:hover {
+      background: #2b6cb0;
+    }
+    .control-group {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.85rem;
+      background: #1f2738;
+      padding: 6px 10px;
+      border-radius: 6px;
+    }
+    #asciiWrapper {
+      background: #030308;
+      border-radius: 10px;
+      border: 1px solid #2d3748;
+      overflow: hidden;
+      box-shadow: 0 8px 30px rgba(0,0,0,0.8);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    canvas#renderCanvas {
+      display: block;
+    }
+    video {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Color Video & 3D ASCII Studio (Python)</h1>
+
+  <div class="panel">
+    <button py-click="start_sun_moon" style="background: #d69e2e;">Sun & Moon 3D Demo</button>
+
+    <label class="btn">
+      Upload Video (.mp4)
+      <input type="file" id="fileInput" accept="video/*" style="display: none;" py-change="load_file">
+    </label>
+
+    <input type="text" id="videoUrl" placeholder="Direct .mp4 URL...">
+    <button py-click="load_url">Load URL</button>
+
+    <div class="control-group">
+      <label for="fontSize">Size:</label>
+      <input type="range" id="fontSize" min="8" max="20" value="13">
+    </div>
+
+    <div class="control-group">
+      <label for="colorMode">Color:</label>
+      <input type="checkbox" id="colorMode" checked>
+    </div>
+
+    <button py-click="download_ascii" style="background: #2f855a;">Download (.txt)</button>
+  </div>
+
+  <div id="asciiWrapper">
+    <canvas id="renderCanvas" width="1150" height="650"></canvas>
+  </div>
+
+  <video id="sourceVideo" loop muted playsinline crossorigin="anonymous"></video>
+  <canvas id="hiddenCanvas" style="display: none;"></canvas>
+
+  <script type="py">
+import math
+import random
+from js import document, window, URL, Blob
+from pyodide.ffi import create_proxy
+
+video = document.getElementById("sourceVideo")
+hidden_canvas = document.getElementById("hiddenCanvas")
+hidden_ctx = hidden_canvas.getContext("2d", { "willReadFrequently": True })
+
+render_canvas = document.getElementById("renderCanvas")
+ctx = render_canvas.getContext("2d")
+
+ASCII_CHARS = " .':;!*=#$@"
+mode = "demo"  # "demo" or "video"
+last_txt_frame = ""
+
+# Gwiazdy w tle dla trybu Sun & Moon
+stars = []
+for _ in range(75):
+    stars.append({
+        "x": random.randint(10, 1140),
+        "y": random.randint(10, 640),
+        "char": random.choice(["+", ".", "*", "x"])
+    })
+
+angle_sun = 0.0
+angle_moon = 0.0
+
+def start_sun_moon(event=None):
+    global mode
+    mode = "demo"
+    video.pause()
+
+def load_file(event):
+    global mode
+    files = document.getElementById("fileInput").files
+    if files.length > 0:
+        file = files.item(0)
+        video.src = URL.createObjectURL(file)
+        mode = "video"
+        video.play()
+
+def load_url(event):
+    global mode
+    url = document.getElementById("videoUrl").value.strip()
+    if not url:
+        return
+    if "youtube.com" in url or "youtu.be" in url or "tiktok.com" in url:
+        window.alert("YouTube/TikTok links are web pages, not direct .mp4 files. Please download the video first and click 'Upload Video (.mp4)'.")
+        return
+    video.src = url
+    mode = "video"
+    video.play()
+
+def draw_demo_sphere(cx, cy, radius, angle_y, base_col, light_dir, font_size, use_color):
+    lx, ly, lz = light_dir
+    l_len = math.sqrt(lx*lx + ly*ly + lz*lz)
+    lx, ly, lz = lx/l_len, ly/l_len, lz/l_len
+
+    cos_y, sin_y = math.cos(angle_y), math.sin(angle_y)
+    step_y = int(font_size * 0.85)
+    step_x = int(font_size * 0.6)
+    r_int = int(radius)
+
+    for y in range(-r_int, r_int + 1, step_y):
+        for x in range(-r_int, r_int + 1, step_x):
+            d_sq = x*x + y*y
+            if d_sq <= radius*radius:
+                z = math.sqrt(radius*radius - d_sq)
+                nx, ny, nz = x/radius, y/radius, z/radius
+
+                rx = nx * cos_y + nz * sin_y
+                ry = ny
+                rz = -nx * sin_y + nz * cos_y
+
+                diff = max(0.0, rx*lx + ry*ly + rz*lz)
+                char_idx = int(diff * (len(ASCII_CHARS) - 1))
+                ch = ASCII_CHARS[char_idx]
+
+                if use_color:
+                    r = int(base_col[0] * (0.15 + 0.85 * diff))
+                    g = int(base_col[1] * (0.15 + 0.85 * diff))
+                    b = int(base_col[2] * (0.15 + 0.85 * diff))
+                    ctx.fillStyle = f"rgb({r},{g},{b})"
+                else:
+                    v = int(255 * diff)
+                    ctx.fillStyle = f"rgb({v},{v},{v})"
+
+                ctx.fillText(ch, cx + x, cy + y)
+
+def main_loop(timestamp=0):
+    global angle_sun, angle_moon, last_txt_frame
+
+    font_size = int(document.getElementById("fontSize").value)
+    use_color = document.getElementById("colorMode").checked
+
+    W = render_canvas.width
+    H = render_canvas.height
+
+    ctx.fillStyle = "#030308"
+    ctx.fillRect(0, 0, W, H)
+    ctx.font = f"bold {font_size}px 'Courier New', monospace"
+
+    if mode == "demo":
+        # Gwiazdy w tle
+        ctx.fillStyle = "#4a5568"
+        for s in stars:
+            ctx.fillText(s["char"], s["x"], s["y"])
+
+        # Słońce (lewa strona)
+        draw_demo_sphere(W * 0.3, H * 0.5, 195, angle_sun, (255, 185, 50), (0.8, -0.4, 1.0), font_size, use_color)
+        # Księżyc (prawa strona)
+        draw_demo_sphere(W * 0.7, H * 0.5, 195, angle_moon, (80, 175, 255), (-0.8, -0.3, 0.9), font_size, use_color)
+
+        angle_sun += 0.035
+        angle_moon -= 0.025
+
+    elif mode == "video" and not video.paused and not video.ended and video.videoWidth > 0:
+        char_w = max(5, int(font_size * 0.62))
+        char_h = font_size
+
+        cols = W // char_w
+        rows = H // char_h
+
+        hidden_canvas.width = cols
+        hidden_canvas.height = rows
+        hidden_ctx.drawImage(video, 0, 0, cols, rows)
+        img_data = hidden_ctx.getImageData(0, 0, cols, rows).data
+
+        txt_rows = []
+        chars_max = len(ASCII_CHARS) - 1
+
+        for y in range(rows):
+            row_str = []
+            pos_y = (y + 1) * char_h
+            for x in range(cols):
+                idx = (y * cols + x) * 4
+                r = img_data[idx]
+                g = img_data[idx + 1]
+                b = img_data[idx + 2]
+
+                lum = int(0.299 * r + 0.587 * g + 0.114 * b)
+                ch = ASCII_CHARS[int((lum / 255.0) * chars_max)]
+                row_str.append(ch)
+
+                if lum > 12:
+                    if use_color:
+                        ctx.fillStyle = f"rgb({r},{g},{b})"
+                    else:
+                        ctx.fillStyle = f"rgb({lum},{lum},{lum})"
+                    ctx.fillText(ch, x * char_w, pos_y)
+            txt_rows.append("".join(row_str))
+        last_txt_frame = "\n".join(txt_rows)
+
+    window.requestAnimationFrame(create_proxy(main_loop))
+
+def download_ascii(event):
+    content = last_txt_frame if last_txt_frame else "ASCII Studio Frame"
+    blob = Blob.new([content], { "type": "text/plain;charset=utf-8" })
+    a = document.createElement("a")
+    a.href = URL.createObjectURL(blob)
+    a.download = "ascii_art.txt"
+    a.click()
+
+main_loop()
+  </script>
+</body>
+</html>
